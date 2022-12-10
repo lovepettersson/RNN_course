@@ -1,0 +1,289 @@
+import numpy as np
+import networkx as nx
+import random as random
+
+def local_complementation(target, G):
+    G_target = nx.ego_graph(G, target, 1, center=False)
+    G.remove_edges_from(list(G_target.edges()))
+    G_target_comp = nx.complement(G_target)
+    G = nx.compose(G, G_target_comp)
+    H = nx.Graph(G)
+    return H
+
+
+def gen_photon(QD, target, graph):
+    operation_flag = True
+    # if graph.has_edge(QD, target):
+    #     operation_flag = False
+    G = graph
+    numb_edges = len(graph.edges(target))
+    if numb_edges == 0:
+        G.add_edge(QD, target)
+    else:
+        operation_flag = False
+        # graph.add_edge(QD, target)
+    return G, operation_flag
+
+
+def CZ_between_QDs(targ1, targ2, G):
+    old_edges = list(G.edges())
+    old_nodes = G.nodes()
+    new_graph = nx.Graph()
+    new_graph.add_nodes_from(old_nodes)
+    if (targ1, targ2) in old_edges:
+        old_edges.remove((targ1, targ2))
+    elif (targ2, targ1) in old_edges:
+        old_edges.remove((targ2, targ1))
+    else:
+        old_edges.append((targ1, targ2))
+    for e in old_edges:
+        u, v = e
+        new_graph.add_edge(u, v)
+    if G.has_edge(targ1, targ2):
+        G.remove_edge(targ1, targ2)
+    else:
+        G.add_edge(targ1, targ2)
+    return G
+
+
+def gen_graph(numb_qubits, QD1, QD2, QD3):
+    temp_graph = nx.Graph()
+    nodes = range(numb_qubits)
+    temp_graph.add_nodes_from(nodes)
+    # temp_graph = graph
+    i = 0
+    operation_sequence = []
+    graph_inputs = []
+    CZ_count = 0
+    while not nx.is_connected(temp_graph):
+        # if CZ_count > 0:
+        #     operation = random.randint(0, numb_qubits)
+        # else:
+        #     operation = random.randint(0, numb_qubits + 3)
+        operation = random.randint(0, numb_qubits + 2)
+        i_before = i
+        if operation < numb_qubits - 3:
+            target = operation + 3
+            QD = random.randint(0, 2)
+            push_or_gen = random.randint(0, 1)
+            if push_or_gen == 0:
+                temp_graph, operation_flag = gen_photon(QD, target, temp_graph)
+            else:
+                temp_graph, operation_flag = gen_photon(QD, target, temp_graph)
+            if operation_flag == False:
+                continue
+            else:
+                i += 1
+                if push_or_gen == 0:
+                    operation_sequence.append("gen-QD-" + str(QD) + "-" + str(target))
+                else:
+                    operation_sequence.append("push-QD-" + str(QD) + "-" + str(target))
+        elif operation == numb_qubits - 3:
+            temp_graph = CZ_between_QDs(QD1, QD2, temp_graph)
+            operation_sequence.append("CZ12")
+            CZ_count += 1
+            i += 1
+        elif operation == numb_qubits - 2:
+            temp_graph = CZ_between_QDs(QD3, QD2, temp_graph)
+            operation_sequence.append("CZ32")
+            CZ_count += 1
+            i += 1
+        elif operation == numb_qubits - 1:
+            temp_graph = CZ_between_QDs(QD1, QD3, temp_graph)
+            operation_sequence.append("CZ13")
+            CZ_count += 1
+            i += 1
+        else:
+            target = operation - (numb_qubits - 1)
+            # print(target)
+            numb_edges = len(temp_graph.edges(target))
+            if numb_edges < 2:
+                continue
+            else:
+                temp_graph = local_complementation(target, temp_graph)
+                operation_sequence.append("LC-" + str(target))
+                i += 1
+        if i > i_before:
+            graph_inputs.append(temp_graph.edges())
+    return temp_graph, operation_sequence, graph_inputs
+
+
+
+
+
+def generate_new_qubit_push_entanglement(QD, target, G):
+    ed = list(G.edges(target))
+    old_nodes = G.nodes()
+    new_graph = nx.Graph()
+    new_graph.add_nodes_from(old_nodes)
+    old_edges = list(G.edges())
+    if len(ed) == 0:
+        operation_flag = True
+        for e in old_edges:
+            u, v = e
+            if u == QD:
+                u = target
+                new_graph.add_edge(u,v)
+            else:
+                new_graph.add_edge(u, v)
+        new_graph.add_edge(QD, target)
+    else:
+        operation_flag = False
+        new_graph = G
+    return new_graph, operation_flag
+
+
+def convert_targets(targets_list, numb_qubits):
+    int_targets = []
+    for target in targets_list:
+        if target[:2] == "LC":
+            qubit = int(target[3:])
+            int_target = qubit + 3
+            int_targets.append(int_target)
+        elif target[:4] == "push":
+            target_photon = int(target[10])
+            # int_target = numb_qubits - 4 + target_photon
+            int_target = 7
+            int_targets.append(int_target)
+        elif target[:3] == "gen":
+            target_photon = int(target[-1])
+            # int_target = target_photon - 2
+            int_target = 0
+            int_targets.append(int_target)
+        else:
+            if target[:4] == "CZ12":
+              int_targets.append(1)
+            if target[:4] == "CZ32":
+              int_targets.append(2)
+            else:
+              int_targets.append(3)
+    # print(int_targets)
+            
+    return int_targets
+
+
+def gen_graphs_from_targets(targets, numb_qubits):
+    graph_list = []
+    g = nx.Graph()
+    nodes = range(numb_qubits)
+    g.add_nodes_from(nodes)
+    for target in targets:
+        edges = list(g.edges())
+        graph_list.append(edges)
+        # nx.draw(g, with_labels=True)
+        # plt.show()
+        if target[:2] == "LC":
+            qubit = int(target[3:])
+            g = local_complementation(qubit, g)
+            # graph_list.append(g.edges())
+        elif target[:4] == "push":
+            target_photon = int(target[10])
+            QD = int(target[8])
+            g, f = generate_new_qubit_push_entanglement(QD, target_photon, g)
+            # graph_list.append(g.edges())
+        elif target[:3] == "gen":
+            target_photon = int(target[-1])
+            QD = int(target[7])
+            g, f = generate_new_qubit_push_entanglement(QD, target_photon, g)
+        else:
+            if target[:4] == "CZ12":
+               g = CZ_between_QDs(0, 1, g)
+            if target[:4] == "CZ32":
+               g = CZ_between_QDs(2, 1, g)
+            else:
+               g = CZ_between_QDs(0, 2, g)
+            # g = CZ_between_QDs(0, 1, g)
+
+    return graph_list
+
+
+
+def convert_inputs_to_arrays(input_graphs, numb_qubits):
+    input_arrays = []
+    for edges in input_graphs:
+        # print(edges)
+        Graph = nx.Graph()
+        nodes = range(numb_qubits)
+        Graph.add_nodes_from(nodes)
+        Graph.add_edges_from(edges)
+        adj_trans = nx.to_numpy_matrix(Graph)
+        #adj_trans = adj_trans.toarray()
+        adj_trans = np.reshape(adj_trans, (numb_qubits ** 2))
+        input_arrays.append(adj_trans)
+    return input_arrays
+
+
+def convert_targets_to_arrays(targets, numb_qubits):
+    array_of_targets = []
+    for target in targets:
+        tar = np.zeros(8)
+        tar[target] = 1
+        array_of_targets.append(tar)
+    return array_of_targets
+
+def add_last_remove_first(Graph, input_arrays, numb_qubits):
+    adj_trans = nx.to_numpy_matrix(Graph)
+    #adj_trans = adj_trans.toarray()
+    adj_trans = np.reshape(adj_trans, (numb_qubits ** 2))
+    input_arrays.append(adj_trans)
+    del input_arrays[0]
+    return input_arrays
+
+def gen_dataset(numb_graphs, numb_qubits):
+    training_set = []
+    label_set = []
+    inputs = []
+    targets_in = []
+    for _ in range(numb_graphs):
+        G, targets, input_graphs = gen_graph(numb_qubits, 0, 1)
+        input_list = gen_graphs_from_targets(targets, numb_qubits)
+        input_arrays = convert_inputs_to_arrays(input_list, numb_qubits)
+        training_labels = convert_targets(targets, numb_qubits)
+        training_data = add_last_remove_first(G, input_arrays, numb_qubits)
+        array_targets = convert_targets_to_arrays(training_labels, numb_qubits)
+        for i in range(len(training_labels)):
+            training_set.append(training_data[i])
+            label_set.append(array_targets[i])
+            targets_in.append(training_labels[i])
+            inputs.append(input_arrays[i])
+
+    return training_set, label_set, inputs, targets_in
+
+
+def gen_dataset_only_next_last_graph(numb_graphs, numb_qubits):
+    training_set = []
+    label_set = []
+    inputs = []
+    targets_in = []
+    for _ in range(numb_graphs):
+        G, targets, input_graphs = gen_graph(numb_qubits, 0, 1, 2)
+        input_list = gen_graphs_from_targets(targets, numb_qubits)
+        input_arrays = convert_inputs_to_arrays(input_list, numb_qubits)
+        training_labels = convert_targets(targets, numb_qubits)
+        training_data = add_last_remove_first(G, input_arrays, numb_qubits)
+        array_targets = convert_targets_to_arrays(training_labels, numb_qubits)
+        for i in range(6, len(training_data)):
+            training_set.append(training_data[i])
+            label_set.append(array_targets[i])
+            targets_in.append(training_labels[i])
+            inputs.append(input_arrays[i])
+
+        # training_set.append(training_data[-2])
+        # label_set.append(array_targets[-2])
+        # targets_in.append(training_labels[-2])
+        # inputs.append(input_arrays[-2])
+        # training_set.append(training_data[-3])
+        # label_set.append(array_targets[-3])
+        # targets_in.append(training_labels[-3])
+        # inputs.append(input_arrays[-3])
+        # training_set.append(training_data[-4])
+        # label_set.append(array_targets[-4])
+        # targets_in.append(training_labels[-4])
+        # inputs.append(input_arrays[-4])
+
+    return training_set, label_set, inputs, targets_in
+
+
+dataset = gen_dataset_only_next_last_graph(10, 5)
+print(dataset[1])
+print(dataset[0])
